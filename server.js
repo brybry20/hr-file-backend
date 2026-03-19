@@ -19,13 +19,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 3001; // <- IMPORTANT: Use environment port
+const PORT = process.env.PORT || 3001;
 
-// CORS configuration for production
+// CORS configuration for production - FIXED
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:4173',
-  'https://hr-file-frontend.onrender.com', // Replace with your frontend URL later
+  'https://hr-file-frontend.onrender.com',
   'https://hr-file-backend.onrender.com'
 ];
 
@@ -45,17 +45,19 @@ app.use(cors({
 
 app.use(express.json());
 
-// Session configuration
+// Session configuration - FIXED FOR PRODUCTION
 app.use(session({
   secret: process.env.SESSION_SECRET || 'hr-file-secret-key-dev-only',
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === 'production', // true in production (HTTPS only)
+    secure: process.env.NODE_ENV === 'production', // true in production
     httpOnly: true,
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // IMPORTANT: 'none' for cross-site
     maxAge: 1000 * 60 * 60 * 24 * 7 // 1 week
   },
-  name: 'hrfile.sid'
+  name: 'hrfile.sid',
+  proxy: process.env.NODE_ENV === 'production' // trust proxy in production
 }));
 
 // Connect to SQLite database
@@ -352,7 +354,7 @@ app.get('/api/check-tables', (req, res) => {
   });
 });
 
-// Health check endpoint (important for Render)
+// Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ 
     status: 'OK', 
