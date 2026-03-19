@@ -1,18 +1,17 @@
-FROM node:22-slim
+FROM node:22-bullseye
 
-WORKDIR /opt/render/project/src
+WORKDIR /usr/src/app
 
-# Install necessary build tools for sqlite3
-RUN apt-get update && apt-get install -y \
-    python3 \
-    make \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
-
+# Kopyahin lamang ang package files para magamit ang Docker cache
 COPY package*.json ./
-RUN npm ci --build-from-source
 
+# I-clear ang npm cache at mag-install nang direkta mula sa source
+RUN npm cache clean --force && \
+    npm install --build-from-source
+
+# Kopyahin ang natitirang source code
 COPY . .
 
 EXPOSE 3001
+
 CMD ["node", "server.js"]
