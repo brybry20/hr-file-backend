@@ -344,70 +344,82 @@ db.serialize(() => {
   });
 
   // ========== AUTO-SEED BANK ACCOUNTS (from your Excel) ==========
-  db.get("SELECT COUNT(*) as count FROM bank_accounts", (err, row) => {
-    if (err) {
-      console.error('❌ Error checking bank_accounts:', err.message);
-    } else if (row.count === 0) {
-      console.log('🌱 Seeding bank accounts...');
-      
-      const bankAccountsData = [
-        ['Abilar, Nickah Joy Bulasa', '1225-0200-6590'],
-        ['Asistio, Christine Haley Santos', '1225-0205-0050'],
-        ['Atam, Sarze Bansil', '325-002-9320'],
-        ['Aydalla, Karla', '1225-0205-2746'],
-        ['Balagat, Mac James Guevarra', '1225-0203-7818'],
-        ['Ballena, Geraldo Alvis', '325-020-3816'],
-        ['Ballena, Junicio Alvis', '1225-0202-6982'],
-        ['Borromeo, Felicisimo Minas', ''],
-        ['Canatoy, Michael John Espares', '1225-0200-9832'],
-        ['Carretas, Israel Lex Catanghal', '1225-0201-5458'],
-        ['Ceniza, Evangeline Gonzalvo', '1225-0205-2738'],
-        ['Del Rosario, Michael Nepomuceno', '1225-0200-3729'],
-        ['Diocena, Arvin Jay Santos', '1225-0205-7047'],
-        ['Echague, Francis Angelo Panganiban', '1225-0203-7798'],
-        ['Evangelista, Maria Eleanor Becina', '1284-0201-4527'],
-        ['Figueroa, Mariella Izon', ''],
-        ['Garcia, Rey Neo', '1225-0202-9205'],
-        ['Gatchalian, Jefferson Rivera', '1225-0204-0659'],
-        ['Geres, Mariel Jimenez', '1225-0202-6990'],
-        ['Genova, Ramel Bermio', '1225-0200-9816'],
-        ['Hilario, Reynold Cadavis', '1225-0202-7040'],
-        ['Interino, Nicky Boy Trio', '1225-0202-7067'],
-        ['Labado, Ronel Ogcila', '1225-0202-7806'],
-        ['Lagas, Arlene Namoco', '325-017-5915'],
-        ['Leano, Mark Ading Mendiola', '1225-0203-9162'],
-        ['Lozada, Ryan Posanso', '1225-0204-8587'],
-        ['Magallanes, Francis', '1225-0203-7305'],
-        ['Marcos, Gladys Joy Remegio', '1225-0202-7032'],
-        ['Masilungan, Harold Reyes', '325-020-7113'],
-        ['Navida, Donald Eslao', '1225-0205-3122'],
-        ['Reyes, Robin Garbacio', '1225-0202-7024'],
-        ['Rios, Lordielle Reyes', '1225-0205-7179'],
-        ['Tatel, Alexander Teope', '1225-0200-5543'],
-        ['Temones, Kennett Bozar', '1225-0202-7814'],
-        ['Vargas, Mario Pagcaliwanagan', '']
-      ];
+// ========== AUTO-SEED BANK ACCOUNTS (with table check) ==========
+// Siguraduhin muna na may table bago mag-seed
+db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='bank_accounts'", (err, tableExists) => {
+  if (err) {
+    console.error('❌ Error checking bank_accounts table:', err.message);
+  } else if (!tableExists) {
+    console.log('⚠️ bank_accounts table does not exist yet, skipping seed');
+  } else {
+    // Table exists, check if it has data
+    db.get("SELECT COUNT(*) as count FROM bank_accounts", (err, row) => {
+      if (err) {
+        console.error('❌ Error checking bank_accounts:', err.message);
+      } else if (row.count === 0) {
+        console.log('🌱 Seeding bank accounts...');
+        
+        const bankAccountsData = [
+          ['Abilar, Nickah Joy Bulasa', '1225-0200-6590'],
+          ['Asistio, Christine Haley Santos', '1225-0205-0050'],
+          ['Atam, Sarze Bansil', '325-002-9320'],
+          ['Aydalla, Karla', '1225-0205-2746'],
+          ['Balagat, Mac James Guevarra', '1225-0203-7818'],
+          ['Ballena, Geraldo Alvis', '325-020-3816'],
+          ['Ballena, Junicio Alvis', '1225-0202-6982'],
+          ['Borromeo, Felicisimo Minas', ''],
+          ['Canatoy, Michael John Espares', '1225-0200-9832'],
+          ['Carretas, Israel Lex Catanghal', '1225-0201-5458'],
+          ['Ceniza, Evangeline Gonzalvo', '1225-0205-2738'],
+          ['Del Rosario, Michael Nepomuceno', '1225-0200-3729'],
+          ['Diocena, Arvin Jay Santos', '1225-0205-7047'],
+          ['Echague, Francis Angelo Panganiban', '1225-0203-7798'],
+          ['Evangelista, Maria Eleanor Becina', '1284-0201-4527'],
+          ['Figueroa, Mariella Izon', ''],
+          ['Garcia, Rey Neo', '1225-0202-9205'],
+          ['Gatchalian, Jefferson Rivera', '1225-0204-0659'],
+          ['Geres, Mariel Jimenez', '1225-0202-6990'],
+          ['Genova, Ramel Bermio', '1225-0200-9816'],
+          ['Hilario, Reynold Cadavis', '1225-0202-7040'],
+          ['Interino, Nicky Boy Trio', '1225-0202-7067'],
+          ['Labado, Ronel Ogcila', '1225-0202-7806'],
+          ['Lagas, Arlene Namoco', '325-017-5915'],
+          ['Leano, Mark Ading Mendiola', '1225-0203-9162'],
+          ['Lozada, Ryan Posanso', '1225-0204-8587'],
+          ['Magallanes, Francis', '1225-0203-7305'],
+          ['Marcos, Gladys Joy Remegio', '1225-0202-7032'],
+          ['Masilungan, Harold Reyes', '325-020-7113'],
+          ['Navida, Donald Eslao', '1225-0205-3122'],
+          ['Reyes, Robin Garbacio', '1225-0202-7024'],
+          ['Rios, Lordielle Reyes', '1225-0205-7179'],
+          ['Tatel, Alexander Teope', '1225-0200-5543'],
+          ['Temones, Kennett Bozar', '1225-0202-7814'],
+          ['Vargas, Mario Pagcaliwanagan', '']
+        ];
 
-      const stmt = db.prepare('INSERT INTO bank_accounts (name, account_number) VALUES (?, ?)');
-      
-      let inserted = 0;
-      bankAccountsData.forEach((acc, index) => {
-        stmt.run([acc[0], acc[1] || ''], function(err) {
-          if (err) {
-            console.error(`❌ Error inserting ${acc[0]}:`, err.message);
-          } else {
-            inserted++;
-            if (inserted === bankAccountsData.length) {
-              console.log(`✅ Bank accounts seeded successfully (${inserted} records)`);
+        const stmt = db.prepare('INSERT INTO bank_accounts (name, account_number) VALUES (?, ?)');
+        
+        let inserted = 0;
+        bankAccountsData.forEach((acc, index) => {
+          stmt.run([acc[0], acc[1] || ''], function(err) {
+            if (err) {
+              console.error(`❌ Error inserting ${acc[0]}:`, err.message);
+            } else {
+              inserted++;
+              if (inserted === bankAccountsData.length) {
+                console.log(`✅ Bank accounts seeded successfully (${inserted} records)`);
+              }
             }
-          }
+          });
         });
-      });
-      stmt.finalize();
-    } else {
-      console.log(`✅ Bank accounts table already has ${row.count} records`);
-    }
-  });
+        stmt.finalize();
+      } else {
+        console.log(`✅ Bank accounts table already has ${row.count} records`);
+      }
+    });
+  }
+});
+// ===============================================================
   // ===============================================================
 });
 
