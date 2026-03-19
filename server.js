@@ -9,7 +9,7 @@ import { dirname, join } from 'path';
 import authRoutes from './routes/auth.js';
 import employeeRoutes from './routes/employees.js';
 import resignedRoutes from './routes/resigned.js';
-import bankAccountsRoutes from './routes/bankaccounts.js';
+import bankAccountsRoutes from './routes/bankAccounts.js';
 import hardwareRoutes from './routes/hardware.js';
 import phoneRoutes from './routes/phones.js';   
 import carsRoutes from './routes/cars.js';
