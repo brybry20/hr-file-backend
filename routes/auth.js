@@ -3,33 +3,33 @@ const router = express.Router();
 
 export default function(db) {
   // Login
-  router.post('/login', (req, res) => {
-    const { username, password } = req.body;
+router.post('/login', (req, res) => {
+  const { username, password } = req.body;
 
-    db.get(
-      'SELECT * FROM users WHERE username = ? AND password = ?',
-      [username, password],
-      (err, user) => {
-        if (err) {
-          return res.status(500).json({ error: 'Database error' });
-        }
-        if (!user) {
-          return res.status(401).json({ error: 'Invalid credentials' });
-        }
-
-        req.session.userId = user.id;
-        req.session.username = user.username;
-        
-        // Save session explicitly
-        req.session.save((err) => {
-          if (err) {
-            return res.status(500).json({ error: 'Session error' });
-          }
-          res.json({ success: true, username: user.username });
-        });
+  db.get(
+    'SELECT * FROM users WHERE username = ? AND password = ?',
+    [username, password],
+    (err, user) => {
+      if (err) {
+        return res.status(500).json({ error: 'Database error' });
       }
-    );
-  });
+      if (!user) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      req.session.userId = user.id;
+      req.session.username = user.username;
+      
+      // I-SAVE ANG SESSION
+      req.session.save((err) => {
+        if (err) {
+          return res.status(500).json({ error: 'Session error' });
+        }
+        res.json({ success: true, username: user.username });
+      });
+    }
+  );
+});
 
   // Refresh token / check session
   router.get('/refresh', (req, res) => {
