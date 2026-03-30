@@ -281,7 +281,7 @@ db.serialize(() => {
     uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
-  // NEW: Folders table for persistent folder storage
+  // Folders table for persistent folder storage
   db.run(`CREATE TABLE IF NOT EXISTS employee_folders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     employee_id INTEGER NOT NULL,
@@ -370,17 +370,14 @@ app.post('/api/employees/:employeeId/files', requireAuth, upload.array('files', 
 
   console.log(`📤 Uploading ${req.files.length} files for employee ${employeeId}`);
   
-  const files = req.files.map(file => {
-    console.log(`  - ${file.originalname} (${file.mimetype}) -> ${file.path}`);
-    return {
-      employee_id: employeeId,
-      file_name: file.originalname,
-      file_type: file.mimetype,
-      file_size: file.size,
-      cloudinary_url: file.path,
-      public_id: file.filename
-    };
-  });
+  const files = req.files.map(file => ({
+    employee_id: employeeId,
+    file_name: file.originalname,
+    file_type: file.mimetype,
+    file_size: file.size,
+    cloudinary_url: file.path,
+    public_id: file.filename
+  }));
 
   const stmt = db.prepare(
     `INSERT INTO employee_files (employee_id, file_name, file_type, file_size, cloudinary_url, public_id)
@@ -388,23 +385,26 @@ app.post('/api/employees/:employeeId/files', requireAuth, upload.array('files', 
   );
 
   let inserted = 0;
-  let errors = [];
+  const insertedFiles = [];
   
   files.forEach((file, idx) => {
-    stmt.run([file.employee_id, file.file_name, file.file_type, file.file_size, file.cloudinary_url, file.public_id], (err) => {
+    stmt.run([file.employee_id, file.file_name, file.file_type, file.file_size, file.cloudinary_url, file.public_id], function(err) {
       if (err) {
         console.error(`❌ DB insert error for ${file.file_name}:`, err.message);
-        errors.push(file.file_name);
       } else {
         inserted++;
-        console.log(`✅ Saved to DB: ${file.file_name}`);
+        insertedFiles.push({
+          id: this.lastID,
+          ...file
+        });
+        console.log(`✅ Saved to DB: ${file.file_name} (ID: ${this.lastID})`);
       }
       if (idx === files.length - 1) {
         stmt.finalize();
-        if (errors.length === 0) {
-          res.json({ success: true, message: `Uploaded ${inserted} files`, files });
+        if (insertedFiles.length > 0) {
+          res.json({ success: true, message: `Uploaded ${insertedFiles.length} files`, files: insertedFiles });
         } else {
-          res.status(500).json({ error: 'Some files failed to save', uploaded: inserted, failed: errors });
+          res.status(500).json({ error: 'Failed to save files to database' });
         }
       }
     });
@@ -421,6 +421,51 @@ app.get('/api/employees/:employeeId/files', requireAuth, (req, res) => {
       res.json(rows);
     }
   );
+});
+
+// Get files for current folder view
+app.get('/api/employees/:employeeId/folder-files', requireAuth, (req, res) => {
+  const employeeId = req.params.employeeId;
+  const { folderId } = req.query;
+  
+  if (folderId && folderId !== 'null' && folderId !== 'undefined') {
+    // Get files in specific folder
+    db.get('SELECT file_ids FROM employee_folders WHERE id = ? AND employee_id = ?', [folderId, employeeId], (err, folder) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (!folder) return res.json([]);
+      
+      const fileIds = JSON.parse(folder.file_ids || '[]');
+      if (fileIds.length === 0) {
+        return res.json([]);
+      }
+      
+      const placeholders = fileIds.map(() => '?').join(',');
+      db.all(`SELECT * FROM employee_files WHERE id IN (${placeholders}) ORDER BY uploaded_at DESC`, fileIds, (err, files) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(files);
+      });
+    });
+  } else {
+    // Get files not in any folder (root files)
+    db.all('SELECT * FROM employee_files WHERE employee_id = ? ORDER BY uploaded_at DESC', [employeeId], (err, allFiles) => {
+      if (err) return res.status(500).json({ error: err.message });
+      
+      // Get all file IDs that are in folders
+      db.all('SELECT file_ids FROM employee_folders WHERE employee_id = ?', [employeeId], (err, folders) => {
+        if (err) return res.status(500).json({ error: err.message });
+        
+        const filesInFolders = new Set();
+        folders.forEach(folder => {
+          const ids = JSON.parse(folder.file_ids || '[]');
+          ids.forEach(id => filesInFolders.add(id));
+        });
+        
+        // Filter out files that are in any folder
+        const rootFiles = allFiles.filter(file => !filesInFolders.has(file.id));
+        res.json(rootFiles);
+      });
+    });
+  }
 });
 
 // Delete a file
@@ -625,7 +670,7 @@ app.delete('/api/folders/:folderId', requireAuth, (req, res) => {
   });
 });
 
-// Move file to folder
+// Move file to folder (or remove from folder)
 app.post('/api/folders/:folderId/move-file', requireAuth, (req, res) => {
   const folderId = req.params.folderId;
   const { fileId } = req.body;
@@ -634,23 +679,26 @@ app.post('/api/folders/:folderId/move-file', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'File ID is required' });
   }
   
-  // First, remove file from all folders
+  const fileIdNum = parseInt(fileId);
+  
+  // First, remove file from ALL folders
   db.all('SELECT id, file_ids FROM employee_folders', [], (err, folders) => {
     if (err) return res.status(500).json({ error: err.message });
     
     let updates = 0;
     let totalUpdates = folders.length;
     
+    // If no folders exist
     if (totalUpdates === 0) {
-      // If no folders, just add to target
-      if (folderId) {
+      if (folderId !== 'root') {
+        // Add to target folder
         db.get('SELECT file_ids FROM employee_folders WHERE id = ?', [folderId], (err, folder) => {
           if (err) return res.status(500).json({ error: err.message });
           if (!folder) return res.status(404).json({ error: 'Folder not found' });
           
           let fileIds = JSON.parse(folder.file_ids || '[]');
-          if (!fileIds.includes(parseInt(fileId))) {
-            fileIds.push(parseInt(fileId));
+          if (!fileIds.includes(fileIdNum)) {
+            fileIds.push(fileIdNum);
             db.run('UPDATE employee_folders SET file_ids = ? WHERE id = ?', [JSON.stringify(fileIds), folderId], (err) => {
               if (err) return res.status(500).json({ error: err.message });
               res.json({ success: true, message: 'File moved to folder' });
@@ -665,10 +713,11 @@ app.post('/api/folders/:folderId/move-file', requireAuth, (req, res) => {
       return;
     }
     
+    // Remove from all folders
     folders.forEach(folder => {
       let fileIds = JSON.parse(folder.file_ids || '[]');
-      const hadFile = fileIds.includes(parseInt(fileId));
-      fileIds = fileIds.filter(id => id !== parseInt(fileId));
+      const hadFile = fileIds.includes(fileIdNum);
+      fileIds = fileIds.filter(id => id !== fileIdNum);
       
       db.run('UPDATE employee_folders SET file_ids = ? WHERE id = ?', [JSON.stringify(fileIds), folder.id], (err) => {
         if (err) console.error('Error updating folder:', err);
@@ -676,14 +725,14 @@ app.post('/api/folders/:folderId/move-file', requireAuth, (req, res) => {
         
         if (updates === totalUpdates) {
           // After removing from all folders, add to target folder if specified
-          if (folderId) {
+          if (folderId !== 'root') {
             db.get('SELECT file_ids FROM employee_folders WHERE id = ?', [folderId], (err, targetFolder) => {
               if (err) return res.status(500).json({ error: err.message });
               if (!targetFolder) return res.status(404).json({ error: 'Target folder not found' });
               
               let targetFileIds = JSON.parse(targetFolder.file_ids || '[]');
-              if (!targetFileIds.includes(parseInt(fileId))) {
-                targetFileIds.push(parseInt(fileId));
+              if (!targetFileIds.includes(fileIdNum)) {
+                targetFileIds.push(fileIdNum);
                 db.run('UPDATE employee_folders SET file_ids = ? WHERE id = ?', [JSON.stringify(targetFileIds), folderId], (err) => {
                   if (err) return res.status(500).json({ error: err.message });
                   res.json({ success: true, message: 'File moved to folder' });
@@ -697,28 +746,6 @@ app.post('/api/folders/:folderId/move-file', requireAuth, (req, res) => {
           }
         }
       });
-    });
-  });
-});
-
-// Get files in a folder
-app.get('/api/folders/:folderId/files', requireAuth, (req, res) => {
-  const folderId = req.params.folderId;
-  
-  db.get('SELECT file_ids FROM employee_folders WHERE id = ?', [folderId], (err, folder) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!folder) return res.status(404).json({ error: 'Folder not found' });
-    
-    const fileIds = JSON.parse(folder.file_ids || '[]');
-    
-    if (fileIds.length === 0) {
-      return res.json([]);
-    }
-    
-    const placeholders = fileIds.map(() => '?').join(',');
-    db.all(`SELECT * FROM employee_files WHERE id IN (${placeholders})`, fileIds, (err, files) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(files);
     });
   });
 });
