@@ -281,6 +281,20 @@ db.serialize(() => {
     uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
+  // NEW: Folders table for persistent folder storage
+  db.run(`CREATE TABLE IF NOT EXISTS employee_folders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL,
+    folder_name TEXT NOT NULL,
+    parent_id INTEGER,
+    file_ids TEXT DEFAULT '[]',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+  )`, (err) => {
+    if (err) console.error('❌ Error creating employee_folders:', err.message);
+    else console.log('✅ employee_folders table created');
+  });
+
   console.log('✅ All tables created');
 });
 
@@ -289,7 +303,7 @@ setTimeout(() => {
   db.get("SELECT * FROM users WHERE username = 'admin'", (err, row) => {
     if (!row) {
       db.run("INSERT INTO users (username, password) VALUES (?, ?)", ['admin', 'admin123']);
-      console.log('✅ Default admin created');
+      console.log('✅ Default admin created - Username: admin, Password: admin123');
     }
   });
 
@@ -314,9 +328,39 @@ setTimeout(() => {
   });
 }, 500);
 
+// ========== AUTH ROUTES ==========
+app.post('/api/auth/login', (req, res) => {
+  const { username, password } = req.body;
+  
+  db.get('SELECT * FROM users WHERE username = ? AND password = ?', [username, password], (err, user) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    
+    req.session.userId = user.id;
+    req.session.username = user.username;
+    
+    res.json({ success: true, user: { id: user.id, username: user.username } });
+  });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  req.session.destroy((err) => {
+    if (err) return res.status(500).json({ error: 'Logout failed' });
+    res.json({ success: true });
+  });
+});
+
+app.get('/api/auth/status', (req, res) => {
+  if (req.session.userId) {
+    res.json({ authenticated: true, userId: req.session.userId, username: req.session.username });
+  } else {
+    res.json({ authenticated: false });
+  }
+});
+
 // ========== FILE UPLOAD ROUTES ==========
 
-// Upload multiple files for an employee - FIXED
+// Upload multiple files for an employee
 app.post('/api/employees/:employeeId/files', requireAuth, upload.array('files', 20), (req, res) => {
   const employeeId = req.params.employeeId;
 
@@ -387,11 +431,23 @@ app.delete('/api/files/:fileId', requireAuth, (req, res) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!file) return res.status(404).json({ error: 'File not found' });
 
-    // Determine resource type for Cloudinary deletion
     let resourceType = 'raw';
     if (file.file_type?.startsWith('image/')) {
       resourceType = 'image';
     }
+    
+    // Also remove from any folders
+    db.all('SELECT id, file_ids FROM employee_folders', [], (err, folders) => {
+      if (!err && folders) {
+        folders.forEach(folder => {
+          let fileIds = JSON.parse(folder.file_ids || '[]');
+          if (fileIds.includes(parseInt(fileId))) {
+            fileIds = fileIds.filter(id => id !== parseInt(fileId));
+            db.run('UPDATE employee_folders SET file_ids = ? WHERE id = ?', [JSON.stringify(fileIds), folder.id]);
+          }
+        });
+      }
+    });
     
     cloudinary.uploader.destroy(file.public_id, { resource_type: resourceType }, (cloudErr) => {
       if (cloudErr) console.error('Cloudinary delete error:', cloudErr);
@@ -412,21 +468,15 @@ app.put('/api/files/:fileId/rename', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'New name is required' });
   }
   
-  db.get('SELECT public_id, file_name, file_type FROM employee_files WHERE id = ?', [fileId], (err, file) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!file) return res.status(404).json({ error: 'File not found' });
-    
-    // Just update the database name without trying to rename in Cloudinary
-    // to avoid complications with raw files
-    db.run(
-      'UPDATE employee_files SET file_name = ? WHERE id = ?',
-      [newName.trim(), fileId],
-      function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true, message: 'File renamed successfully', newName: newName.trim() });
-      }
-    );
-  });
+  db.run(
+    'UPDATE employee_files SET file_name = ? WHERE id = ?',
+    [newName.trim(), fileId],
+    function(err) {
+      if (err) return res.status(500).json({ error: err.message });
+      if (this.changes === 0) return res.status(404).json({ error: 'File not found' });
+      res.json({ success: true, message: 'File renamed successfully', newName: newName.trim() });
+    }
+  );
 });
 
 // Get file count per employee
@@ -441,34 +491,236 @@ app.get('/api/employees/:employeeId/files-count', requireAuth, (req, res) => {
   );
 });
 
-// ========== AUTH ROUTES ==========
-app.post('/api/auth/login', (req, res) => {
-  const { username, password } = req.body;
+// ========== FOLDER ROUTES ==========
+
+// Get all folders for an employee
+app.get('/api/employees/:employeeId/folders', requireAuth, (req, res) => {
+  const employeeId = req.params.employeeId;
   
-  db.get('SELECT * FROM users WHERE username = ? AND password = ?', [username, password], (err, user) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-    
-    req.session.userId = user.id;
-    req.session.username = user.username;
-    
-    res.json({ success: true, user: { id: user.id, username: user.username } });
-  });
+  db.all(
+    'SELECT * FROM employee_folders WHERE employee_id = ? ORDER BY created_at DESC',
+    [employeeId],
+    (err, rows) => {
+      if (err) {
+        console.error('Error fetching folders:', err);
+        return res.status(500).json({ error: err.message });
+      }
+      
+      const folders = rows.map(row => ({
+        id: row.id,
+        name: row.folder_name,
+        parentId: row.parent_id,
+        fileIds: JSON.parse(row.file_ids || '[]'),
+        createdAt: row.created_at
+      }));
+      
+      res.json(folders);
+    }
+  );
 });
 
-app.post('/api/auth/logout', (req, res) => {
-  req.session.destroy((err) => {
-    if (err) return res.status(500).json({ error: 'Logout failed' });
-    res.json({ success: true });
-  });
-});
-
-app.get('/api/auth/status', (req, res) => {
-  if (req.session.userId) {
-    res.json({ authenticated: true, userId: req.session.userId, username: req.session.username });
-  } else {
-    res.json({ authenticated: false });
+// Create a new folder
+app.post('/api/employees/:employeeId/folders', requireAuth, (req, res) => {
+  const employeeId = req.params.employeeId;
+  const { name, parentId } = req.body;
+  
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'Folder name is required' });
   }
+  
+  db.run(
+    'INSERT INTO employee_folders (employee_id, folder_name, parent_id, file_ids) VALUES (?, ?, ?, ?)',
+    [employeeId, name.trim(), parentId || null, '[]'],
+    function(err) {
+      if (err) {
+        console.error('Error creating folder:', err);
+        return res.status(500).json({ error: err.message });
+      }
+      
+      res.json({
+        id: this.lastID,
+        name: name.trim(),
+        parentId: parentId || null,
+        fileIds: [],
+        success: true,
+        message: 'Folder created successfully'
+      });
+    }
+  );
+});
+
+// Update folder (rename)
+app.put('/api/folders/:folderId', requireAuth, (req, res) => {
+  const folderId = req.params.folderId;
+  const { name } = req.body;
+  
+  if (!name || !name.trim()) {
+    return res.status(400).json({ error: 'Folder name is required' });
+  }
+  
+  db.run(
+    'UPDATE employee_folders SET folder_name = ? WHERE id = ?',
+    [name.trim(), folderId],
+    function(err) {
+      if (err) {
+        console.error('Error renaming folder:', err);
+        return res.status(500).json({ error: err.message });
+      }
+      
+      if (this.changes === 0) {
+        return res.status(404).json({ error: 'Folder not found' });
+      }
+      
+      res.json({ success: true, message: 'Folder renamed successfully' });
+    }
+  );
+});
+
+// Delete folder (recursive)
+app.delete('/api/folders/:folderId', requireAuth, (req, res) => {
+  const folderId = req.params.folderId;
+  
+  // Recursive function to get all subfolder IDs
+  const getAllSubfolderIds = (parentId, callback) => {
+    db.all('SELECT id FROM employee_folders WHERE parent_id = ?', [parentId], (err, rows) => {
+      if (err) return callback(err, []);
+      
+      const subIds = rows.map(r => r.id);
+      let processed = 0;
+      let allIds = [...subIds];
+      
+      if (subIds.length === 0) {
+        return callback(null, allIds);
+      }
+      
+      subIds.forEach(subId => {
+        getAllSubfolderIds(subId, (err, deeperIds) => {
+          if (!err && deeperIds) allIds.push(...deeperIds);
+          processed++;
+          if (processed === subIds.length) {
+            callback(null, allIds);
+          }
+        });
+      });
+    });
+  };
+  
+  getAllSubfolderIds(folderId, (err, subIds) => {
+    if (err) {
+      console.error('Error getting subfolders:', err);
+      return res.status(500).json({ error: err.message });
+    }
+    
+    const allIds = [parseInt(folderId), ...subIds];
+    const placeholders = allIds.map(() => '?').join(',');
+    
+    db.run(`DELETE FROM employee_folders WHERE id IN (${placeholders})`, allIds, function(err) {
+      if (err) {
+        console.error('Error deleting folders:', err);
+        return res.status(500).json({ error: err.message });
+      }
+      
+      res.json({ success: true, message: `Deleted ${this.changes} folder(s)` });
+    });
+  });
+});
+
+// Move file to folder
+app.post('/api/folders/:folderId/move-file', requireAuth, (req, res) => {
+  const folderId = req.params.folderId;
+  const { fileId } = req.body;
+  
+  if (!fileId) {
+    return res.status(400).json({ error: 'File ID is required' });
+  }
+  
+  // First, remove file from all folders
+  db.all('SELECT id, file_ids FROM employee_folders', [], (err, folders) => {
+    if (err) return res.status(500).json({ error: err.message });
+    
+    let updates = 0;
+    let totalUpdates = folders.length;
+    
+    if (totalUpdates === 0) {
+      // If no folders, just add to target
+      if (folderId) {
+        db.get('SELECT file_ids FROM employee_folders WHERE id = ?', [folderId], (err, folder) => {
+          if (err) return res.status(500).json({ error: err.message });
+          if (!folder) return res.status(404).json({ error: 'Folder not found' });
+          
+          let fileIds = JSON.parse(folder.file_ids || '[]');
+          if (!fileIds.includes(parseInt(fileId))) {
+            fileIds.push(parseInt(fileId));
+            db.run('UPDATE employee_folders SET file_ids = ? WHERE id = ?', [JSON.stringify(fileIds), folderId], (err) => {
+              if (err) return res.status(500).json({ error: err.message });
+              res.json({ success: true, message: 'File moved to folder' });
+            });
+          } else {
+            res.json({ success: true, message: 'File already in folder' });
+          }
+        });
+      } else {
+        res.json({ success: true, message: 'File moved to root' });
+      }
+      return;
+    }
+    
+    folders.forEach(folder => {
+      let fileIds = JSON.parse(folder.file_ids || '[]');
+      const hadFile = fileIds.includes(parseInt(fileId));
+      fileIds = fileIds.filter(id => id !== parseInt(fileId));
+      
+      db.run('UPDATE employee_folders SET file_ids = ? WHERE id = ?', [JSON.stringify(fileIds), folder.id], (err) => {
+        if (err) console.error('Error updating folder:', err);
+        updates++;
+        
+        if (updates === totalUpdates) {
+          // After removing from all folders, add to target folder if specified
+          if (folderId) {
+            db.get('SELECT file_ids FROM employee_folders WHERE id = ?', [folderId], (err, targetFolder) => {
+              if (err) return res.status(500).json({ error: err.message });
+              if (!targetFolder) return res.status(404).json({ error: 'Target folder not found' });
+              
+              let targetFileIds = JSON.parse(targetFolder.file_ids || '[]');
+              if (!targetFileIds.includes(parseInt(fileId))) {
+                targetFileIds.push(parseInt(fileId));
+                db.run('UPDATE employee_folders SET file_ids = ? WHERE id = ?', [JSON.stringify(targetFileIds), folderId], (err) => {
+                  if (err) return res.status(500).json({ error: err.message });
+                  res.json({ success: true, message: 'File moved to folder' });
+                });
+              } else {
+                res.json({ success: true, message: 'File already in folder' });
+              }
+            });
+          } else {
+            res.json({ success: true, message: 'File moved to root' });
+          }
+        }
+      });
+    });
+  });
+});
+
+// Get files in a folder
+app.get('/api/folders/:folderId/files', requireAuth, (req, res) => {
+  const folderId = req.params.folderId;
+  
+  db.get('SELECT file_ids FROM employee_folders WHERE id = ?', [folderId], (err, folder) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!folder) return res.status(404).json({ error: 'Folder not found' });
+    
+    const fileIds = JSON.parse(folder.file_ids || '[]');
+    
+    if (fileIds.length === 0) {
+      return res.json([]);
+    }
+    
+    const placeholders = fileIds.map(() => '?').join(',');
+    db.all(`SELECT * FROM employee_files WHERE id IN (${placeholders})`, fileIds, (err, files) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json(files);
+    });
+  });
 });
 
 // ========== ROUTES ==========
@@ -500,5 +752,6 @@ app.listen(PORT, () => {
   console.log(`🚀 Backend server running on port ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`📁 File upload routes: /api/employees/:id/files`);
+  console.log(`📂 Folder routes: /api/employees/:id/folders`);
   console.log(`📄 Supported files: Images, PDF, Word, Excel`);
 });
