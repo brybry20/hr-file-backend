@@ -1,9 +1,5 @@
 import dotenv from 'dotenv';
 dotenv.config();
-console.log('🔧 Cloudinary Credentials Check:');
-console.log('CLOUDINARY_CLOUD_NAME:', process.env.CLOUDINARY_CLOUD_NAME || '❌ MISSING');
-console.log('CLOUDINARY_API_KEY:', process.env.CLOUDINARY_API_KEY ? '✅ SET' : '❌ MISSING');
-console.log('CLOUDINARY_API_SECRET:', process.env.CLOUDINARY_API_SECRET ? '✅ SET' : '❌ MISSING');
 
 import express from 'express';
 import cors from 'cors';
@@ -21,7 +17,7 @@ import employeeRoutes from './routes/employees.js';
 import resignedRoutes from './routes/resigned.js';
 import bankAccountsRoutes from './routes/bankAccounts.js';
 import hardwareRoutes from './routes/hardware.js';
-import phoneRoutes from './routes/phones.js';   
+import phoneRoutes from './routes/phones.js';
 import carsRoutes from './routes/cars.js';
 import birthdaysRoutes from './routes/birthdays.js';
 
@@ -38,29 +34,88 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
+// Configure multer storage with Cloudinary - FIXED FOR ALL FILE TYPES
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: async (req, file) => {
     const isImage = file.mimetype.startsWith('image/');
-    return {
-      folder: `employees/${req.params.employeeId}`,
-      allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'doc', 'docx', 'xls', 'xlsx'],
-      resource_type: 'auto',
-      ...(isImage && { transformation: [{ width: 1000, crop: 'limit' }] })
-    };
+    const isPdf = file.mimetype === 'application/pdf';
+    const isWord = file.mimetype === 'application/msword' || 
+                   file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const isExcel = file.mimetype === 'application/vnd.ms-excel' || 
+                    file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    
+    // Clean filename - remove special characters
+    const originalName = file.originalname.replace(/\.[^/.]+$/, '');
+    const timestamp = Date.now();
+    const safeFileName = `${originalName.replace(/[^a-zA-Z0-9]/g, '_')}_${timestamp}`;
+    
+    // Determine resource type and format
+    if (isImage) {
+      return {
+        folder: `employees/${req.params.employeeId}`,
+        public_id: safeFileName,
+        resource_type: 'image',
+        format: file.mimetype.split('/')[1],
+        transformation: [{ width: 1000, crop: 'limit' }]
+      };
+    } else if (isPdf) {
+      return {
+        folder: `employees/${req.params.employeeId}`,
+        public_id: safeFileName,
+        resource_type: 'raw',
+        format: 'pdf'
+      };
+    } else if (isWord) {
+      return {
+        folder: `employees/${req.params.employeeId}`,
+        public_id: safeFileName,
+        resource_type: 'raw',
+        format: 'docx'
+      };
+    } else if (isExcel) {
+      return {
+        folder: `employees/${req.params.employeeId}`,
+        public_id: safeFileName,
+        resource_type: 'raw',
+        format: 'xlsx'
+      };
+    } else {
+      return {
+        folder: `employees/${req.params.employeeId}`,
+        public_id: safeFileName,
+        resource_type: 'raw'
+      };
+    }
   }
 });
 
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 }
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowedMimes = [
+      'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    ];
+    
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error(`File type ${file.mimetype} not supported`), false);
+    }
+  }
 });
-// ===============================================
 
 // CORS configuration
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:4173',
+  'http://localhost:3000',
   'https://hr-file-frontend.onrender.com',
   'https://hr-file-backend.onrender.com'
 ];
@@ -107,7 +162,7 @@ const db = new sqlite3.Database(join(__dirname, 'hr_database.sqlite'));
 // ========== CREATE ALL TABLES ==========
 db.serialize(() => {
   console.log('📦 Creating tables...');
-  
+
   db.run(`CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT UNIQUE NOT NULL,
@@ -161,10 +216,7 @@ db.serialize(() => {
     name TEXT NOT NULL,
     account_number TEXT NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`, function(err) {
-    if (err) console.error('❌ Error creating bank_accounts:', err.message);
-    else console.log('✅ bank_accounts table created');
-  });
+  )`);
 
   db.run(`CREATE TABLE IF NOT EXISTS hardware_inventory (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -227,10 +279,7 @@ db.serialize(() => {
     cloudinary_url TEXT NOT NULL,
     public_id TEXT NOT NULL,
     uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`, (err) => {
-    if (err) console.error('❌ Error creating employee_files:', err.message);
-    else console.log('✅ employee_files table ready');
-  });
+  )`);
 
   console.log('✅ All tables created');
 });
@@ -263,63 +312,11 @@ setTimeout(() => {
       console.log('✅ Sample employees added');
     }
   });
-
-  setTimeout(() => {
-    db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='bank_accounts'", (err, tableExists) => {
-      if (tableExists) {
-        db.get("SELECT COUNT(*) as count FROM bank_accounts", (err, row) => {
-          if (row && row.count === 0) {
-            console.log('🌱 Seeding bank accounts...');
-            const bankAccountsData = [
-              ['Abilar, Nickah Joy Bulasa', '1225-0200-6590'],
-              ['Asistio, Christine Haley Santos', '1225-0205-0050'],
-              ['Atam, Sarze Bansil', '325-002-9320'],
-              ['Aydalla, Karla', '1225-0205-2746'],
-              ['Balagat, Mac James Guevarra', '1225-0203-7818'],
-              ['Ballena, Geraldo Alvis', '325-020-3816'],
-              ['Ballena, Junicio Alvis', '1225-0202-6982'],
-              ['Borromeo, Felicisimo Minas', ''],
-              ['Canatoy, Michael John Espares', '1225-0200-9832'],
-              ['Carretas, Israel Lex Catanghal', '1225-0201-5458'],
-              ['Ceniza, Evangeline Gonzalvo', '1225-0205-2738'],
-              ['Del Rosario, Michael Nepomuceno', '1225-0200-3729'],
-              ['Diocena, Arvin Jay Santos', '1225-0205-7047'],
-              ['Echague, Francis Angelo Panganiban', '1225-0203-7798'],
-              ['Evangelista, Maria Eleanor Becina', '1284-0201-4527'],
-              ['Figueroa, Mariella Izon', ''],
-              ['Garcia, Rey Neo', '1225-0202-9205'],
-              ['Gatchalian, Jefferson Rivera', '1225-0204-0659'],
-              ['Geres, Mariel Jimenez', '1225-0202-6990'],
-              ['Genova, Ramel Bermio', '1225-0200-9816'],
-              ['Hilario, Reynold Cadavis', '1225-0202-7040'],
-              ['Interino, Nicky Boy Trio', '1225-0202-7067'],
-              ['Labado, Ronel Ogcila', '1225-0202-7806'],
-              ['Lagas, Arlene Namoco', '325-017-5915'],
-              ['Leano, Mark Ading Mendiola', '1225-0203-9162'],
-              ['Lozada, Ryan Posanso', '1225-0204-8587'],
-              ['Magallanes, Francis', '1225-0203-7305'],
-              ['Marcos, Gladys Joy Remegio', '1225-0202-7032'],
-              ['Masilungan, Harold Reyes', '325-020-7113'],
-              ['Navida, Donald Eslao', '1225-0205-3122'],
-              ['Reyes, Robin Garbacio', '1225-0202-7024'],
-              ['Rios, Lordielle Reyes', '1225-0205-7179'],
-              ['Tatel, Alexander Teope', '1225-0200-5543'],
-              ['Temones, Kennett Bozar', '1225-0202-7814'],
-              ['Vargas, Mario Pagcaliwanagan', '']
-            ];
-            const stmt = db.prepare('INSERT INTO bank_accounts (name, account_number) VALUES (?, ?)');
-            bankAccountsData.forEach(acc => stmt.run([acc[0], acc[1] || '']));
-            stmt.finalize();
-            console.log('✅ Bank accounts seeded');
-          }
-        });
-      }
-    });
-  }, 1000);
 }, 500);
 
 // ========== FILE UPLOAD ROUTES ==========
 
+// Upload multiple files for an employee - FIXED
 app.post('/api/employees/:employeeId/files', requireAuth, upload.array('files', 20), (req, res) => {
   const employeeId = req.params.employeeId;
 
@@ -327,14 +324,19 @@ app.post('/api/employees/:employeeId/files', requireAuth, upload.array('files', 
     return res.status(400).json({ error: 'No files uploaded' });
   }
 
-  const files = req.files.map(file => ({
-    employee_id: employeeId,
-    file_name: file.originalname,
-    file_type: file.mimetype,
-    file_size: file.size,
-    cloudinary_url: file.path,
-    public_id: file.filename
-  }));
+  console.log(`📤 Uploading ${req.files.length} files for employee ${employeeId}`);
+  
+  const files = req.files.map(file => {
+    console.log(`  - ${file.originalname} (${file.mimetype}) -> ${file.path}`);
+    return {
+      employee_id: employeeId,
+      file_name: file.originalname,
+      file_type: file.mimetype,
+      file_size: file.size,
+      cloudinary_url: file.path,
+      public_id: file.filename
+    };
+  });
 
   const stmt = db.prepare(
     `INSERT INTO employee_files (employee_id, file_name, file_type, file_size, cloudinary_url, public_id)
@@ -342,22 +344,30 @@ app.post('/api/employees/:employeeId/files', requireAuth, upload.array('files', 
   );
 
   let inserted = 0;
+  let errors = [];
+  
   files.forEach((file, idx) => {
     stmt.run([file.employee_id, file.file_name, file.file_type, file.file_size, file.cloudinary_url, file.public_id], (err) => {
-      if (err) console.error('DB insert error:', err);
-      else inserted++;
+      if (err) {
+        console.error(`❌ DB insert error for ${file.file_name}:`, err.message);
+        errors.push(file.file_name);
+      } else {
+        inserted++;
+        console.log(`✅ Saved to DB: ${file.file_name}`);
+      }
       if (idx === files.length - 1) {
         stmt.finalize();
-        if (inserted === files.length) {
+        if (errors.length === 0) {
           res.json({ success: true, message: `Uploaded ${inserted} files`, files });
         } else {
-          res.status(500).json({ error: 'Some files failed to save' });
+          res.status(500).json({ error: 'Some files failed to save', uploaded: inserted, failed: errors });
         }
       }
     });
   });
 });
 
+// Get all files for an employee
 app.get('/api/employees/:employeeId/files', requireAuth, (req, res) => {
   db.all(
     'SELECT * FROM employee_files WHERE employee_id = ? ORDER BY uploaded_at DESC',
@@ -369,14 +379,21 @@ app.get('/api/employees/:employeeId/files', requireAuth, (req, res) => {
   );
 });
 
+// Delete a file
 app.delete('/api/files/:fileId', requireAuth, (req, res) => {
   const fileId = req.params.fileId;
 
-  db.get('SELECT public_id FROM employee_files WHERE id = ?', [fileId], (err, file) => {
+  db.get('SELECT public_id, file_type FROM employee_files WHERE id = ?', [fileId], (err, file) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!file) return res.status(404).json({ error: 'File not found' });
 
-    cloudinary.uploader.destroy(file.public_id, (cloudErr) => {
+    // Determine resource type for Cloudinary deletion
+    let resourceType = 'raw';
+    if (file.file_type?.startsWith('image/')) {
+      resourceType = 'image';
+    }
+    
+    cloudinary.uploader.destroy(file.public_id, { resource_type: resourceType }, (cloudErr) => {
       if (cloudErr) console.error('Cloudinary delete error:', cloudErr);
       db.run('DELETE FROM employee_files WHERE id = ?', [fileId], function(err) {
         if (err) return res.status(500).json({ error: err.message });
@@ -386,6 +403,33 @@ app.delete('/api/files/:fileId', requireAuth, (req, res) => {
   });
 });
 
+// Rename file
+app.put('/api/files/:fileId/rename', requireAuth, (req, res) => {
+  const fileId = req.params.fileId;
+  const { newName } = req.body;
+  
+  if (!newName || !newName.trim()) {
+    return res.status(400).json({ error: 'New name is required' });
+  }
+  
+  db.get('SELECT public_id, file_name, file_type FROM employee_files WHERE id = ?', [fileId], (err, file) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (!file) return res.status(404).json({ error: 'File not found' });
+    
+    // Just update the database name without trying to rename in Cloudinary
+    // to avoid complications with raw files
+    db.run(
+      'UPDATE employee_files SET file_name = ? WHERE id = ?',
+      [newName.trim(), fileId],
+      function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true, message: 'File renamed successfully', newName: newName.trim() });
+      }
+    );
+  });
+});
+
+// Get file count per employee
 app.get('/api/employees/:employeeId/files-count', requireAuth, (req, res) => {
   db.get(
     'SELECT COUNT(*) as count FROM employee_files WHERE employee_id = ?',
@@ -397,23 +441,45 @@ app.get('/api/employees/:employeeId/files-count', requireAuth, (req, res) => {
   );
 });
 
-// ========== ROUTES ==========
-app.get('/api/check-tables', (req, res) => {
-  db.all("SELECT name FROM sqlite_master WHERE type='table'", (err, tables) => {
+// ========== AUTH ROUTES ==========
+app.post('/api/auth/login', (req, res) => {
+  const { username, password } = req.body;
+  
+  db.get('SELECT * FROM users WHERE username = ? AND password = ?', [username, password], (err, user) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json(tables);
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    
+    req.session.userId = user.id;
+    req.session.username = user.username;
+    
+    res.json({ success: true, user: { id: user.id, username: user.username } });
   });
 });
 
+app.post('/api/auth/logout', (req, res) => {
+  req.session.destroy((err) => {
+    if (err) return res.status(500).json({ error: 'Logout failed' });
+    res.json({ success: true });
+  });
+});
+
+app.get('/api/auth/status', (req, res) => {
+  if (req.session.userId) {
+    res.json({ authenticated: true, userId: req.session.userId, username: req.session.username });
+  } else {
+    res.json({ authenticated: false });
+  }
+});
+
+// ========== ROUTES ==========
 app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
+  res.json({
+    status: 'OK',
     timestamp: new Date().toISOString(),
     environment: process.env.NODE_ENV || 'development'
   });
 });
 
-// Use routes
 app.use('/api/auth', authRoutes(db));
 app.use('/api/employees', employeeRoutes(db));
 app.use('/api/bank-accounts', bankAccountsRoutes(db));
@@ -422,63 +488,17 @@ app.use('/api/hardware', hardwareRoutes(db));
 app.use('/api/phones', phoneRoutes(db));
 app.use('/api/cars', carsRoutes(db));
 app.use('/api/birthdays', birthdaysRoutes(db));
-
-
-// ... existing code ...
-
-// Use routes
-app.use('/api/auth', authRoutes(db));
-app.use('/api/employees', employeeRoutes(db));
-app.use('/api/bank-accounts', bankAccountsRoutes(db));
-app.use('/api/resigned-employees', resignedRoutes(db));
-app.use('/api/hardware', hardwareRoutes(db));
-app.use('/api/phones', phoneRoutes(db));
-app.use('/api/cars', carsRoutes(db));
-app.use('/api/birthdays', birthdaysRoutes(db));
-
-// ========== TEST CLOUDINARY ROUTE ==========
-app.post('/api/test-cloudinary', requireAuth, (req, res) => {
-  console.log('🔧 Test route hit!');
-  console.log('Session user:', req.session.userId);
-  
-  // Handle multer manually para makita ang error
-  upload.single('file')(req, res, (err) => {
-    if (err) {
-      console.error('❌ Multer/Cloudinary error:', err);
-      return res.status(500).json({ error: err.message || 'Upload failed' });
-    }
-    
-    if (!req.file) {
-      console.error('❌ No file in request');
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
-    
-    console.log('✅ File uploaded successfully!');
-    console.log('File path:', req.file.path);
-    console.log('File public_id:', req.file.filename);
-    
-    res.json({ 
-      success: true, 
-      message: 'Cloudinary upload successful!',
-      url: req.file.path,
-      public_id: req.file.filename
-    });
-  });
-});
 
 // Error handling
 app.use((err, req, res, next) => {
-  console.error('Error:', err.message);
-  res.status(500).json({ error: 'Internal server error' });
-});
-
-app.use((req, res) => {
-  res.status(404).json({ error: 'Route not found' });
+  console.error('❌ Error:', err.message);
+  console.error('Stack:', err.stack);
+  res.status(500).json({ error: err.message || 'Internal server error' });
 });
 
 app.listen(PORT, () => {
   console.log(`🚀 Backend server running on port ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`📁 File upload routes: /api/employees/:id/files`);
+  console.log(`📄 Supported files: Images, PDF, Word, Excel`);
 });
-
