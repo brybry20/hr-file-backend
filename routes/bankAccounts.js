@@ -85,7 +85,7 @@ export default function(db) {
     });
   }, 1000);
 
-  // Get all
+  // Get all bank accounts
   router.get('/', requireAuth, (req, res) => {
     console.log('📥 Fetching all bank accounts');
     db.all('SELECT * FROM bank_accounts ORDER BY name', (err, rows) => {
@@ -98,7 +98,7 @@ export default function(db) {
     });
   });
 
-  // Add
+  // Add new bank account
   router.post('/', requireAuth, (req, res) => {
     console.log('📥 Adding bank account:', req.body);
     
@@ -122,7 +122,7 @@ export default function(db) {
     );
   });
 
-  // Update
+  // Update bank account
   router.put('/:id', requireAuth, (req, res) => {
     console.log(`📥 Updating bank account ${req.params.id}:`, req.body);
     
@@ -145,7 +145,7 @@ export default function(db) {
     );
   });
 
-  // Delete
+  // Delete bank account
   router.delete('/:id', requireAuth, (req, res) => {
     console.log(`📥 Deleting bank account ${req.params.id}`);
     
