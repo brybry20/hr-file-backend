@@ -9,8 +9,7 @@ const requireAuth = (req, res, next) => {
 };
 
 export default function(db) {
-  // REMOVE THE DROP TABLE! Just check if table exists and create if not
-  // Only create table if it doesn't exist - DON'T DROP!
+  // Create table if not exists (DON'T DROP!)
   db.run(`
     CREATE TABLE IF NOT EXISTS bank_accounts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,9 +75,7 @@ export default function(db) {
         
         const stmt = db.prepare('INSERT INTO bank_accounts (name, account_number) VALUES (?, ?)');
         bankAccountsData.forEach(acc => {
-          stmt.run([acc[0], acc[1] || ''], (err) => {
-            if (err) console.error('Error inserting bank account:', err);
-          });
+          stmt.run([acc[0], acc[1] || '']);
         });
         stmt.finalize();
         console.log(`✅ ${bankAccountsData.length} bank accounts seeded`);
@@ -108,7 +105,6 @@ export default function(db) {
     const { name, account_number } = req.body;
     
     if (!name || !account_number) {
-      console.error('❌ Missing required fields');
       return res.status(400).json({ error: 'Name and account number are required' });
     }
     
@@ -141,7 +137,6 @@ export default function(db) {
           return res.status(500).json({ error: err.message });
         }
         if (this.changes === 0) {
-          console.error('❌ Bank account not found');
           return res.status(404).json({ error: 'Bank account not found' });
         }
         console.log(`✅ Bank account updated: ${this.changes} row(s) affected`);
@@ -160,7 +155,6 @@ export default function(db) {
         return res.status(500).json({ error: err.message });
       }
       if (this.changes === 0) {
-        console.error('❌ Bank account not found');
         return res.status(404).json({ error: 'Bank account not found' });
       }
       console.log(`✅ Bank account deleted: ${this.changes} row(s) affected`);
