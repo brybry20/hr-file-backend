@@ -28,20 +28,6 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// ========== DATABASE PATH - USE PERSISTENT STORAGE ON RENDER ==========
-let dbPath;
-if (process.env.NODE_ENV === 'production' && process.env.RENDER) {
-  const dataDir = '/data';
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-  dbPath = join(dataDir, 'hr_database.sqlite');
-  console.log(`📁 Using persistent database at: ${dbPath}`);
-} else {
-  dbPath = join(__dirname, 'hr_database.sqlite');
-  console.log(`📁 Using local database at: ${dbPath}`);
-}
-
 // ========== CLOUDINARY CONFIGURATION ==========
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -140,6 +126,10 @@ const requireAuth = (req, res, next) => {
   }
   next();
 };
+
+// ========== DATABASE PATH ==========
+const dbPath = join(__dirname, 'hr_database.sqlite');
+console.log(`📁 Using database at: ${dbPath}`);
 
 // Connect to SQLite database
 const db = new sqlite3.Database(dbPath);
@@ -255,7 +245,6 @@ db.serialize(() => {
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`);
 
-  // Files table
   db.run(`CREATE TABLE IF NOT EXISTS employee_files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     employee_id INTEGER NOT NULL,
@@ -266,50 +255,36 @@ db.serialize(() => {
     cloudinary_url TEXT NOT NULL,
     public_id TEXT NOT NULL,
     uploaded_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`, (err) => {
-    if (err) console.error('Error creating employee_files:', err);
-    else console.log('✅ employee_files table created');
-  });
+  )`);
 
-  // Folders table
   db.run(`CREATE TABLE IF NOT EXISTS employee_folders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     employee_id INTEGER NOT NULL,
     folder_name TEXT NOT NULL,
     parent_folder_id INTEGER DEFAULT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
-  )`, (err) => {
-    if (err) console.error('Error creating employee_folders:', err);
-    else console.log('✅ employee_folders table created');
-  });
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
 
   console.log('✅ All tables created');
 });
 
-// ========== FIX: ADD MISSING COLUMNS ==========
+// ========== ADD MISSING COLUMNS ==========
 setTimeout(() => {
-  // Add folder_id to employee_files if missing
   db.run("ALTER TABLE employee_files ADD COLUMN folder_id INTEGER DEFAULT NULL", (err) => {
     if (err && !err.message.includes('duplicate column')) {
       console.log('Note: folder_id column may already exist');
-    } else if (!err) {
-      console.log('✅ Added folder_id column to employee_files');
     }
   });
-  
-  // Add parent_folder_id to employee_folders if missing
   db.run("ALTER TABLE employee_folders ADD COLUMN parent_folder_id INTEGER DEFAULT NULL", (err) => {
     if (err && !err.message.includes('duplicate column')) {
       console.log('Note: parent_folder_id column may already exist');
-    } else if (!err) {
-      console.log('✅ Added parent_folder_id column to employee_folders');
     }
   });
 }, 1000);
 
 // ========== INSERT DEFAULT DATA ==========
 setTimeout(() => {
+  // Create admin user
   db.get("SELECT * FROM users WHERE username = 'admin'", (err, row) => {
     if (!row) {
       db.run("INSERT INTO users (username, password) VALUES (?, ?)", ['admin', 'admin123']);
@@ -317,27 +292,22 @@ setTimeout(() => {
     }
   });
 
+  // Add sample employees if none exist
   db.get("SELECT COUNT(*) as count FROM employees", (err, row) => {
     if (row && row.count === 0) {
       const sampleData = [
-        ['Juan Dela Cruz', 'HR Manager', 'BS Psychology', '2020-01-15', '2020-07-15', 'Regular', 45000, '12-3456789-0', '12-345678901-2', '1234-5678-9012', '123-456-789-000', '09171234567', 'juan.delacruz@hrfile.com', '123 Rizal St, Manila', null],
-        ['Maria Santos', 'Senior Developer', 'BS Computer Science', '2021-03-10', '2021-09-10', 'Regular', 55000, '12-3456789-1', '12-345678901-3', '1234-5678-9013', '123-456-789-001', '09172345678', 'maria.santos@hrfile.com', '456 Mabini St, QC', null],
-        ['Pedro Reyes', 'Marketing Specialist', 'BS Business Admin', '2022-06-20', null, 'Probationary', 35000, '12-3456789-2', '12-345678901-4', '1234-5678-9014', '123-456-789-002', '09173456789', 'pedro.reyes@hrfile.com', '789 Luna St, Makati', null]
+        ['Juan Dela Cruz', 'HR Manager', 'BS Psychology', '2020-01-15', '2020-07-15', 'Regular', 45000],
+        ['Maria Santos', 'Senior Developer', 'BS Computer Science', '2021-03-10', '2021-09-10', 'Regular', 55000],
+        ['Pedro Reyes', 'Marketing Specialist', 'BS Business Admin', '2022-06-20', null, 'Probationary', 35000]
       ];
-
-      const stmt = db.prepare(`INSERT INTO employees (
-        name, position, diploma, date_started, date_regularized,
-        employment_status, salary, sss, philhealth, pagibig, tin,
-        cp_viber, official_email, home_address, resignation_date
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
-
+      const stmt = db.prepare(`INSERT INTO employees (name, position, diploma, date_started, date_regularized, employment_status, salary) VALUES (?, ?, ?, ?, ?, ?, ?)`);
       sampleData.forEach(emp => stmt.run(emp));
       stmt.finalize();
       console.log('✅ Sample employees added');
     }
   });
 
-  // Seed bank accounts if empty
+  // Seed bank accounts (shortened version)
   db.get("SELECT COUNT(*) as count FROM bank_accounts", (err, row) => {
     if (row && row.count === 0) {
       console.log('🌱 Seeding bank accounts...');
@@ -349,7 +319,6 @@ setTimeout(() => {
         ['Balagat, Mac James Guevarra', '1225-0203-7818'],
         ['Ballena, Geraldo Alvis', '325-020-3816'],
         ['Ballena, Junicio Alvis', '1225-0202-6982'],
-        ['Borromeo, Felicisimo Minas', ''],
         ['Canatoy, Michael John Espares', '1225-0200-9832'],
         ['Carretas, Israel Lex Catanghal', '1225-0201-5458'],
         ['Ceniza, Evangeline Gonzalvo', '1225-0205-2738'],
@@ -357,7 +326,6 @@ setTimeout(() => {
         ['Diocena, Arvin Jay Santos', '1225-0205-7047'],
         ['Echague, Francis Angelo Panganiban', '1225-0203-7798'],
         ['Evangelista, Maria Eleanor Becina', '1284-0201-4527'],
-        ['Figueroa, Mariella Izon', ''],
         ['Garcia, Rey Neo', '1225-0202-9205'],
         ['Gatchalian, Jefferson Rivera', '1225-0204-0659'],
         ['Geres, Mariel Jimenez', '1225-0202-6990'],
@@ -375,14 +343,11 @@ setTimeout(() => {
         ['Reyes, Robin Garbacio', '1225-0202-7024'],
         ['Rios, Lordielle Reyes', '1225-0205-7179'],
         ['Tatel, Alexander Teope', '1225-0200-5543'],
-        ['Temones, Kennett Bozar', '1225-0202-7814'],
-        ['Vargas, Mario Pagcaliwanagan', '']
+        ['Temones, Kennett Bozar', '1225-0202-7814']
       ];
       
       const stmt = db.prepare('INSERT INTO bank_accounts (name, account_number) VALUES (?, ?)');
-      bankAccountsData.forEach(acc => {
-        stmt.run([acc[0], acc[1] || '']);
-      });
+      bankAccountsData.forEach(acc => stmt.run([acc[0], acc[1] || '']));
       stmt.finalize();
       console.log(`✅ ${bankAccountsData.length} bank accounts seeded`);
     }
@@ -392,14 +357,11 @@ setTimeout(() => {
 // ========== AUTH ROUTES ==========
 app.post('/api/auth/login', (req, res) => {
   const { username, password } = req.body;
-  
   db.get('SELECT * FROM users WHERE username = ? AND password = ?', [username, password], (err, user) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-    
     req.session.userId = user.id;
     req.session.username = user.username;
-    
     res.json({ success: true, user: { id: user.id, username: user.username } });
   });
 });
@@ -421,7 +383,7 @@ app.get('/api/auth/status', (req, res) => {
 
 // ========== FILE UPLOAD ROUTES ==========
 
-// Upload multiple files for an employee
+// Upload files
 app.post('/api/employees/:employeeId/files', requireAuth, upload.array('files', 20), (req, res) => {
   const employeeId = req.params.employeeId;
   const { folderId } = req.query;
@@ -430,108 +392,62 @@ app.post('/api/employees/:employeeId/files', requireAuth, upload.array('files', 
     return res.status(400).json({ error: 'No files uploaded' });
   }
 
-  console.log(`📤 Uploading ${req.files.length} files for employee ${employeeId}`);
-  
-  const results = {
-    success: [],
-    failed: []
-  };
-  
-  const stmt = db.prepare(
-    `INSERT INTO employee_files (employee_id, folder_id, file_name, file_type, file_size, cloudinary_url, public_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  );
+  const results = { success: [], failed: [] };
+  const stmt = db.prepare(`INSERT INTO employee_files (employee_id, folder_id, file_name, file_type, file_size, cloudinary_url, public_id) VALUES (?, ?, ?, ?, ?, ?, ?)`);
 
   let completed = 0;
-  
-  req.files.forEach((file, idx) => {
-    stmt.run([
-      employeeId,
-      folderId || null,
-      file.originalname,
-      file.mimetype,
-      file.size,
-      file.path,
-      file.filename
-    ], function(err) {
+  req.files.forEach((file) => {
+    stmt.run([employeeId, folderId || null, file.originalname, file.mimetype, file.size, file.path, file.filename], function(err) {
       if (err) {
-        console.error(`❌ DB insert error for ${file.originalname}:`, err.message);
         results.failed.push(file.originalname);
       } else {
-        results.success.push({
-          id: this.lastID,
-          file_name: file.originalname,
-          cloudinary_url: file.path
-        });
-        console.log(`✅ Saved to DB: ${file.originalname} (ID: ${this.lastID})`);
+        results.success.push({ id: this.lastID, file_name: file.originalname, cloudinary_url: file.path });
       }
       completed++;
-      
       if (completed === req.files.length) {
         stmt.finalize();
         if (results.failed.length === 0) {
-          res.json({ 
-            success: true, 
-            message: `Uploaded ${results.success.length} files`,
-            files: results.success 
-          });
+          res.json({ success: true, message: `Uploaded ${results.success.length} files`, files: results.success });
         } else {
-          res.status(207).json({ 
-            partial: true,
-            message: `Uploaded ${results.success.length} files, failed: ${results.failed.length}`,
-            success: results.success,
-            failed: results.failed
-          });
+          res.status(207).json({ partial: true, message: `Uploaded ${results.success.length} files, failed: ${results.failed.length}`, success: results.success, failed: results.failed });
         }
       }
     });
   });
 });
 
-// Get files for an employee (with optional folder filter)
+// Get files
 app.get('/api/employees/:employeeId/files', requireAuth, (req, res) => {
   const employeeId = req.params.employeeId;
   const { folderId } = req.query;
-  
   let query = 'SELECT * FROM employee_files WHERE employee_id = ?';
   const params = [employeeId];
   
-  if (folderId && folderId !== 'null' && folderId !== 'undefined') {
+  if (folderId && folderId !== 'null') {
     query += ' AND folder_id = ?';
     params.push(folderId);
   } else if (!folderId || folderId === 'null') {
     query += ' AND (folder_id IS NULL OR folder_id = 0)';
   }
-  
   query += ' ORDER BY uploaded_at DESC';
   
   db.all(query, params, (err, rows) => {
-    if (err) {
-      console.error('Error fetching files:', err);
-      return res.status(500).json({ error: err.message });
-    }
+    if (err) return res.status(500).json({ error: err.message });
     res.json(rows);
   });
 });
 
-// Delete a file
+// Delete file
 app.delete('/api/files/:fileId', requireAuth, (req, res) => {
   const fileId = req.params.fileId;
-
   db.get('SELECT public_id, file_type FROM employee_files WHERE id = ?', [fileId], (err, file) => {
     if (err) return res.status(500).json({ error: err.message });
     if (!file) return res.status(404).json({ error: 'File not found' });
-
-    let resourceType = 'raw';
-    if (file.file_type?.startsWith('image/')) {
-      resourceType = 'image';
-    }
-    
-    cloudinary.uploader.destroy(file.public_id, { resource_type: resourceType }, (cloudErr) => {
-      if (cloudErr) console.error('Cloudinary delete error:', cloudErr);
+    let resourceType = file.file_type?.startsWith('image/') ? 'image' : 'raw';
+    cloudinary.uploader.destroy(file.public_id, { resource_type: resourceType }, () => {
       db.run('DELETE FROM employee_files WHERE id = ?', [fileId], function(err) {
         if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true, message: 'File deleted' });
+        res.json({ success: true });
       });
     });
   });
@@ -539,138 +455,62 @@ app.delete('/api/files/:fileId', requireAuth, (req, res) => {
 
 // Rename file
 app.put('/api/files/:fileId/rename', requireAuth, (req, res) => {
-  const fileId = req.params.fileId;
   const { newName } = req.body;
-  
-  if (!newName || !newName.trim()) {
-    return res.status(400).json({ error: 'New name is required' });
-  }
-  
-  db.run(
-    'UPDATE employee_files SET file_name = ? WHERE id = ?',
-    [newName.trim(), fileId],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      if (this.changes === 0) return res.status(404).json({ error: 'File not found' });
-      res.json({ success: true, message: 'File renamed' });
-    }
-  );
+  if (!newName?.trim()) return res.status(400).json({ error: 'New name is required' });
+  db.run('UPDATE employee_files SET file_name = ? WHERE id = ?', [newName.trim(), req.params.fileId], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    if (this.changes === 0) return res.status(404).json({ error: 'File not found' });
+    res.json({ success: true });
+  });
 });
 
-// Move file to folder
+// Move file
 app.put('/api/files/:fileId/move', requireAuth, (req, res) => {
-  const fileId = req.params.fileId;
   const { folderId } = req.body;
-  
-  db.run(
-    'UPDATE employee_files SET folder_id = ? WHERE id = ?',
-    [folderId || null, fileId],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      if (this.changes === 0) return res.status(404).json({ error: 'File not found' });
-      res.json({ success: true });
-    }
-  );
+  db.run('UPDATE employee_files SET folder_id = ? WHERE id = ?', [folderId || null, req.params.fileId], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ success: true });
+  });
 });
 
 // ========== FOLDER ROUTES ==========
 
-// Get all folders for an employee
+// Get folders
 app.get('/api/employees/:employeeId/folders', requireAuth, (req, res) => {
-  const employeeId = req.params.employeeId;
-  
-  db.all(
-    'SELECT * FROM employee_folders WHERE employee_id = ? ORDER BY created_at DESC',
-    [employeeId],
-    (err, rows) => {
-      if (err) {
-        console.error('Error fetching folders:', err);
-        return res.status(500).json({ error: err.message });
-      }
-      res.json(rows);
-    }
-  );
+  db.all('SELECT * FROM employee_folders WHERE employee_id = ? ORDER BY created_at DESC', [req.params.employeeId], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(rows);
+  });
 });
 
-// Create a new folder
+// Create folder
 app.post('/api/employees/:employeeId/folders', requireAuth, (req, res) => {
-  const employeeId = req.params.employeeId;
   const { name, parentFolderId } = req.body;
-  
-  if (!name || !name.trim()) {
-    return res.status(400).json({ error: 'Folder name is required' });
-  }
-  
-  db.run(
-    'INSERT INTO employee_folders (employee_id, folder_name, parent_folder_id) VALUES (?, ?, ?)',
-    [employeeId, name.trim(), parentFolderId || null],
-    function(err) {
-      if (err) {
-        console.error('Error creating folder:', err);
-        return res.status(500).json({ error: err.message });
-      }
-      
-      res.json({
-        id: this.lastID,
-        employee_id: employeeId,
-        folder_name: name.trim(),
-        parent_folder_id: parentFolderId || null,
-        success: true
-      });
-    }
-  );
+  if (!name?.trim()) return res.status(400).json({ error: 'Folder name is required' });
+  db.run('INSERT INTO employee_folders (employee_id, folder_name, parent_folder_id) VALUES (?, ?, ?)', [req.params.employeeId, name.trim(), parentFolderId || null], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ id: this.lastID, folder_name: name.trim(), parent_folder_id: parentFolderId || null, success: true });
+  });
 });
 
 // Rename folder
 app.put('/api/folders/:folderId', requireAuth, (req, res) => {
-  const folderId = req.params.folderId;
   const { name } = req.body;
-  
-  if (!name || !name.trim()) {
-    return res.status(400).json({ error: 'Folder name is required' });
-  }
-  
-  db.run(
-    'UPDATE employee_folders SET folder_name = ? WHERE id = ?',
-    [name.trim(), folderId],
-    function(err) {
-      if (err) return res.status(500).json({ error: err.message });
-      if (this.changes === 0) return res.status(404).json({ error: 'Folder not found' });
-      res.json({ success: true });
-    }
-  );
+  db.run('UPDATE employee_folders SET folder_name = ? WHERE id = ?', [name.trim(), req.params.folderId], function(err) {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json({ success: true });
+  });
 });
 
 // Delete folder
 app.delete('/api/folders/:folderId', requireAuth, (req, res) => {
   const folderId = req.params.folderId;
-  
-  // Get parent folder ID first
   db.get('SELECT parent_folder_id FROM employee_folders WHERE id = ?', [folderId], (err, folder) => {
     if (err) return res.status(500).json({ error: err.message });
-    
     const parentId = folder?.parent_folder_id || null;
-    
-    // Move all files in this folder to parent folder
-    db.run('UPDATE employee_files SET folder_id = ? WHERE folder_id = ?', [parentId, folderId], (err) => {
-      if (err) console.error('Error moving files:', err);
-      
-      // Delete the folder
+    db.run('UPDATE employee_files SET folder_id = ? WHERE folder_id = ?', [parentId, folderId], () => {
       db.run('DELETE FROM employee_folders WHERE id = ?', [folderId], function(err) {
         if (err) return res.status(500).json({ error: err.message });
-        
-        // Delete subfolders recursively
-        const deleteSubfolders = (parentId) => {
-          db.all('SELECT id FROM employee_folders WHERE parent_folder_id = ?', [parentId], (err, subs) => {
-            if (err) return;
-            subs.forEach(sub => {
-              deleteSubfolders(sub.id);
-              db.run('DELETE FROM employee_folders WHERE id = ?', [sub.id]);
-            });
-          });
-        };
-        deleteSubfolders(folderId);
-        
         res.json({ success: true });
       });
     });
@@ -679,11 +519,7 @@ app.delete('/api/folders/:folderId', requireAuth, (req, res) => {
 
 // ========== ROUTES ==========
 app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
-  });
+  res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
 app.use('/api/auth', authRoutes(db));
@@ -703,5 +539,5 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`🚀 Backend server running on port ${PORT}`);
-  console.log(`📁 Database path: ${dbPath}`);
+  console.log(`📁 Database at: ${dbPath}`);
 });
