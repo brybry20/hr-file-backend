@@ -36,22 +36,53 @@ cloudinary.config({
 });
 
 // Configure multer storage with Cloudinary
+// Configure multer storage with Cloudinary - FIXED FOR PDF AND OFFICE
+// Configure multer storage with Cloudinary - FIXED FOR PDF
 const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: async (req, file) => {
     const isImage = file.mimetype.startsWith('image/');
+    const isPdf = file.mimetype === 'application/pdf';
+    const isWord = file.mimetype === 'application/msword' || 
+                   file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    const isExcel = file.mimetype === 'application/vnd.ms-excel' || 
+                    file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    
     const originalName = file.originalname.replace(/\.[^/.]+$/, '');
     const timestamp = Date.now();
     const safeFileName = `${originalName.replace(/[^a-zA-Z0-9]/g, '_')}_${timestamp}`;
     
-    if (isImage) {
+    // IMPORTANT: For PDF - use 'image' resource_type para gumana ang preview
+    if (isPdf) {
+      return {
+        folder: `employees/${req.params.employeeId}`,
+        public_id: safeFileName,
+        resource_type: 'image',  // <-- CHANGE THIS from 'raw' to 'image'
+        format: 'pdf',
+        access_mode: 'public'
+      };
+    }
+    // For images
+    else if (isImage) {
       return {
         folder: `employees/${req.params.employeeId}`,
         public_id: safeFileName,
         resource_type: 'image',
+        format: file.mimetype.split('/')[1],
         transformation: [{ width: 1000, crop: 'limit' }]
       };
-    } else {
+    }
+    // For Word and Excel
+    else if (isWord || isExcel) {
+      return {
+        folder: `employees/${req.params.employeeId}`,
+        public_id: safeFileName,
+        resource_type: 'raw',
+        format: isWord ? 'docx' : 'xlsx',
+        access_mode: 'public'
+      };
+    }
+    else {
       return {
         folder: `employees/${req.params.employeeId}`,
         public_id: safeFileName,
@@ -382,6 +413,23 @@ app.get('/api/auth/status', (req, res) => {
 });
 
 // ========== FILE UPLOAD ROUTES ==========
+// Serve PDF files directly with authentication
+app.get('/api/files/:fileId/pdf', requireAuth, (req, res) => {
+  const fileId = req.params.fileId;
+  
+  db.get('SELECT cloudinary_url, file_name FROM employee_files WHERE id = ?', [fileId], (err, file) => {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    if (!file) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    
+    // Redirect to Cloudinary URL (no authentication needed since it's a redirect)
+    // Or you can fetch and stream the file
+    res.redirect(file.cloudinary_url);
+  });
+});
 
 // Upload files
 app.post('/api/employees/:employeeId/files', requireAuth, upload.array('files', 20), (req, res) => {
