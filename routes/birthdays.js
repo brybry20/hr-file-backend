@@ -8,62 +8,60 @@ const requireAuth = (req, res, next) => {
   next();
 };
 
-export default function(db) {
-  // Create birthdays table
-  db.run(`
-    CREATE TABLE IF NOT EXISTS birthdays (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      position TEXT NOT NULL,
-      date_started TEXT NOT NULL,
-      regularized TEXT,
-      date_of_birth TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // Get all
-  router.get('/', requireAuth, (req, res) => {
-    db.all('SELECT * FROM birthdays ORDER BY name', (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(rows);
-    });
+export default function(Birthday) {
+  // Get all birthdays
+  router.get('/', requireAuth, async (req, res) => {
+    try {
+      const birthdays = await Birthday.find().sort({ name: 1 });
+      res.json(birthdays);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
-  // Add
-  router.post('/', requireAuth, (req, res) => {
+  // Add birthday
+  router.post('/', requireAuth, async (req, res) => {
     const { name, position, date_started, regularized, date_of_birth } = req.body;
     
-    db.run(
-      'INSERT INTO birthdays (name, position, date_started, regularized, date_of_birth) VALUES (?, ?, ?, ?, ?)',
-      [name, position, date_started, regularized, date_of_birth],
-      function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ id: this.lastID, success: true });
-      }
-    );
+    try {
+      const birthday = await Birthday.create({ name, position, date_started, regularized, date_of_birth });
+      res.json({ id: birthday._id, success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
-  // Update
-  router.put('/:id', requireAuth, (req, res) => {
+  // Update birthday
+  router.put('/:id', requireAuth, async (req, res) => {
     const { name, position, date_started, regularized, date_of_birth } = req.body;
     
-    db.run(
-      'UPDATE birthdays SET name = ?, position = ?, date_started = ?, regularized = ?, date_of_birth = ? WHERE id = ?',
-      [name, position, date_started, regularized, date_of_birth, req.params.id],
-      function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
+    try {
+      const birthday = await Birthday.findByIdAndUpdate(
+        req.params.id,
+        { name, position, date_started, regularized, date_of_birth },
+        { new: true }
+      );
+      
+      if (!birthday) {
+        return res.status(404).json({ error: 'Birthday record not found' });
       }
-    );
-  });
-
-  // Delete
-  router.delete('/:id', requireAuth, (req, res) => {
-    db.run('DELETE FROM birthdays WHERE id = ?', req.params.id, function(err) {
-      if (err) return res.status(500).json({ error: err.message });
       res.json({ success: true });
-    });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Delete birthday
+  router.delete('/:id', requireAuth, async (req, res) => {
+    try {
+      const result = await Birthday.findByIdAndDelete(req.params.id);
+      if (!result) {
+        return res.status(404).json({ error: 'Birthday record not found' });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   return router;

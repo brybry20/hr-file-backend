@@ -1,7 +1,6 @@
 import express from 'express';
 const router = express.Router();
 
-// Authentication middleware
 const requireAuth = (req, res, next) => {
   if (!req.session.userId) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -9,38 +8,41 @@ const requireAuth = (req, res, next) => {
   next();
 };
 
-export default function(db) {
+export default function(ResignedEmployee) {
   // Get all resigned employees
-  router.get('/', requireAuth, (req, res) => {
-    db.all('SELECT * FROM resigned_employees ORDER BY resignation_date DESC', (err, rows) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      res.json(rows);
-    });
+  router.get('/', requireAuth, async (req, res) => {
+    try {
+      const resigned = await ResignedEmployee.find().sort({ resignation_date: -1 });
+      res.json(resigned);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // Get single resigned employee
-  router.get('/:id', requireAuth, (req, res) => {
-    db.get('SELECT * FROM resigned_employees WHERE id = ?', [req.params.id], (err, row) => {
-      if (err) {
-        return res.status(500).json({ error: err.message });
-      }
-      if (!row) {
+  router.get('/:id', requireAuth, async (req, res) => {
+    try {
+      const resigned = await ResignedEmployee.findById(req.params.id);
+      if (!resigned) {
         return res.status(404).json({ error: 'Resigned employee not found' });
       }
-      res.json(row);
-    });
+      res.json(resigned);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   // Delete resigned employee
-  router.delete('/:id', requireAuth, (req, res) => {
-    db.run('DELETE FROM resigned_employees WHERE id = ?', req.params.id, function(err) {
-      if (err) {
-        return res.status(500).json({ error: err.message });
+  router.delete('/:id', requireAuth, async (req, res) => {
+    try {
+      const result = await ResignedEmployee.findByIdAndDelete(req.params.id);
+      if (!result) {
+        return res.status(404).json({ error: 'Resigned employee not found' });
       }
       res.json({ success: true });
-    });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   return router;

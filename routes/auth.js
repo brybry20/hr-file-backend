@@ -1,35 +1,31 @@
 import express from 'express';
 const router = express.Router();
 
-export default function(db) {
+export default function(User) {
   // Login
-router.post('/login', (req, res) => {
-  const { username, password } = req.body;
+  router.post('/login', async (req, res) => {
+    const { username, password } = req.body;
 
-  db.get(
-    'SELECT * FROM users WHERE username = ? AND password = ?',
-    [username, password],
-    (err, user) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error' });
-      }
+    try {
+      const user = await User.findOne({ username, password });
+      
       if (!user) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      req.session.userId = user.id;
+      req.session.userId = user._id;
       req.session.username = user.username;
       
-      // I-SAVE ANG SESSION
       req.session.save((err) => {
         if (err) {
           return res.status(500).json({ error: 'Session error' });
         }
         res.json({ success: true, username: user.username });
       });
+    } catch (error) {
+      res.status(500).json({ error: 'Database error' });
     }
-  );
-});
+  });
 
   // Refresh token / check session
   router.get('/refresh', (req, res) => {
@@ -54,7 +50,7 @@ router.post('/login', (req, res) => {
   });
 
   // Check auth status
-  router.get('/check-auth', (req, res) => {
+  router.get('/status', (req, res) => {
     if (req.session.userId) {
       res.json({ authenticated: true, username: req.session.username });
     } else {

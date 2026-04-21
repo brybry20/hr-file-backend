@@ -8,61 +8,60 @@ const requireAuth = (req, res, next) => {
   next();
 };
 
-export default function(db) {
-  // Create phones table
-  db.run(`
-    CREATE TABLE IF NOT EXISTS phone_inventory (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      unit TEXT NOT NULL,
-      serial_number TEXT NOT NULL,
-      cellphone_number TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
-
-  // Get all
-  router.get('/', requireAuth, (req, res) => {
-    db.all('SELECT * FROM phone_inventory ORDER BY name', (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
-      res.json(rows);
-    });
+export default function(Phone) {
+  // Get all phones
+  router.get('/', requireAuth, async (req, res) => {
+    try {
+      const phones = await Phone.find().sort({ name: 1 });
+      res.json(phones);
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
-  // Add
-  router.post('/', requireAuth, (req, res) => {
+  // Add phone
+  router.post('/', requireAuth, async (req, res) => {
     const { name, unit, serial_number, cellphone_number } = req.body;
     
-    db.run(
-      'INSERT INTO phone_inventory (name, unit, serial_number, cellphone_number) VALUES (?, ?, ?, ?)',
-      [name, unit, serial_number, cellphone_number],
-      function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ id: this.lastID, success: true });
-      }
-    );
+    try {
+      const phone = await Phone.create({ name, unit, serial_number, cellphone_number });
+      res.json({ id: phone._id, success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
-  // Update
-  router.put('/:id', requireAuth, (req, res) => {
+  // Update phone
+  router.put('/:id', requireAuth, async (req, res) => {
     const { name, unit, serial_number, cellphone_number } = req.body;
     
-    db.run(
-      'UPDATE phone_inventory SET name = ?, unit = ?, serial_number = ?, cellphone_number = ? WHERE id = ?',
-      [name, unit, serial_number, cellphone_number, req.params.id],
-      function(err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
+    try {
+      const phone = await Phone.findByIdAndUpdate(
+        req.params.id,
+        { name, unit, serial_number, cellphone_number },
+        { new: true }
+      );
+      
+      if (!phone) {
+        return res.status(404).json({ error: 'Phone not found' });
       }
-    );
-  });
-
-  // Delete
-  router.delete('/:id', requireAuth, (req, res) => {
-    db.run('DELETE FROM phone_inventory WHERE id = ?', req.params.id, function(err) {
-      if (err) return res.status(500).json({ error: err.message });
       res.json({ success: true });
-    });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Delete phone
+  router.delete('/:id', requireAuth, async (req, res) => {
+    try {
+      const result = await Phone.findByIdAndDelete(req.params.id);
+      if (!result) {
+        return res.status(404).json({ error: 'Phone not found' });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
   });
 
   return router;
