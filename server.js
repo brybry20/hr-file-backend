@@ -40,11 +40,28 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // ========== MONGODB CONNECTION ==========
-mongoose.connect(process.env.MONGO_URI, {
-  dbName: 'hr_database'
-})
-.then(() => console.log('✅ MongoDB connected'))
-.catch(err => console.error('❌ MongoDB connection error:', err));
+const connectDB = async () => {
+  try {
+    const uri = process.env.MONGO_URI;
+    if (!uri) {
+      throw new Error('MONGO_URI is not defined in environment variables');
+    }
+    
+    await mongoose.connect(uri, {
+      dbName: 'hr_database'
+    });
+    console.log('🍃 MongoDB connected successfully');
+    
+    // Initialize admin after connection
+    await initializeAdmin();
+  } catch (err) {
+    console.error('❌ MongoDB connection error:', err.message);
+    // In production, we might want to exit if DB connection fails
+    if (process.env.NODE_ENV === 'production') {
+      console.error('Critical failure: Could not connect to DB in production');
+    }
+  }
+};
 
 // ========== CLOUDINARY CONFIGURATION ==========
 cloudinary.config({
@@ -372,16 +389,19 @@ app.use('/api/phones', phoneRoutes(Phone));
 app.use('/api/cars', carsRoutes(Car));
 app.use('/api/birthdays', birthdaysRoutes(Birthday));
 
-// ========== INITIALIZE ==========
-initializeAdmin();
+// ========== START SERVER ==========
+const start = async () => {
+  await connectDB();
+  
+  // Error handling middleware (should be after routes)
+  app.use((err, req, res, next) => {
+    console.error('❌ Error:', err.message);
+    res.status(500).json({ error: err.message || 'Internal server error' });
+  });
 
-// ========== ERROR HANDLING ==========
-app.use((err, req, res, next) => {
-  console.error('❌ Error:', err.message);
-  res.status(500).json({ error: err.message || 'Internal server error' });
-});
+  app.listen(PORT, () => {
+    console.log(`🚀 Backend server running on port ${PORT}`);
+  });
+};
 
-app.listen(PORT, () => {
-  console.log(`🚀 Backend server running on port ${PORT}`);
-  console.log(`🍃 MongoDB connected`);
-});
+start();
