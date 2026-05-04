@@ -1,8 +1,5 @@
-# Create .gitignore file with content
-@"
 node_modules/
 .env
 *.log
 *.sqlite
-*.sqlite3
-"@ | Out-File -FilePath .gitignore -Encoding utf8
+*.sqlite3
