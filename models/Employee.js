@@ -18,4 +18,7 @@ const employeeSchema = new mongoose.Schema({
   resignation_date: String
 }, { timestamps: true });
 
+employeeSchema.set('toJSON', { virtuals: true });
+employeeSchema.set('toObject', { virtuals: true });
+
 export default mongoose.model('Employee', employeeSchema);

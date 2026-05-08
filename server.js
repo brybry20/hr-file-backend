@@ -198,7 +198,7 @@ const initializeAdmin = async () => {
 
 // Upload files
 app.post('/api/employees/:employeeId/files', requireAuth, upload.array('files', 20), async (req, res) => {
-  const employeeId = parseInt(req.params.employeeId);
+  const employeeId = req.params.employeeId;
   const { folderId } = req.query;
 
   if (!req.files || req.files.length === 0) {
@@ -212,7 +212,7 @@ app.post('/api/employees/:employeeId/files', requireAuth, upload.array('files', 
       try {
         const newFile = await EmployeeFile.create({
           employee_id: employeeId,
-          folder_id: folderId ? parseInt(folderId) : null,
+          folder_id: folderId && folderId !== 'null' ? folderId : null,
           file_name: file.originalname,
           file_type: file.mimetype,
           file_size: file.size,
@@ -237,14 +237,14 @@ app.post('/api/employees/:employeeId/files', requireAuth, upload.array('files', 
 
 // Get files
 app.get('/api/employees/:employeeId/files', requireAuth, async (req, res) => {
-  const employeeId = parseInt(req.params.employeeId);
+  const employeeId = req.params.employeeId;
   const { folderId } = req.query;
   
   try {
     let query = { employee_id: employeeId };
     
     if (folderId && folderId !== 'null') {
-      query.folder_id = parseInt(folderId);
+      query.folder_id = folderId;
     } else if (!folderId || folderId === 'null') {
       query.folder_id = null;
     }
@@ -314,7 +314,7 @@ app.put('/api/files/:fileId/move', requireAuth, async (req, res) => {
 // Get folders
 app.get('/api/employees/:employeeId/folders', requireAuth, async (req, res) => {
   try {
-    const folders = await EmployeeFolder.find({ employee_id: parseInt(req.params.employeeId) }).sort({ created_at: -1 });
+    const folders = await EmployeeFolder.find({ employee_id: req.params.employeeId }).sort({ created_at: -1 });
     res.json(folders);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -330,9 +330,9 @@ app.post('/api/employees/:employeeId/folders', requireAuth, async (req, res) => 
   
   try {
     const folder = await EmployeeFolder.create({
-      employee_id: parseInt(req.params.employeeId),
+      employee_id: req.params.employeeId,
       folder_name: name.trim(),
-      parent_folder_id: parentFolderId || null
+      parent_folder_id: parentFolderId && parentFolderId !== 'null' ? parentFolderId : null
     });
     res.json({ id: folder._id, folder_name: folder.folder_name, parent_folder_id: folder.parent_folder_id, success: true });
   } catch (error) {
@@ -363,7 +363,7 @@ app.delete('/api/folders/:folderId', requireAuth, async (req, res) => {
     
     // Update files in this folder to parent folder
     await EmployeeFile.updateMany(
-      { folder_id: parseInt(req.params.folderId) },
+      { folder_id: req.params.folderId },
       { folder_id: parentId }
     );
     
