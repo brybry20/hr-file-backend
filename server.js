@@ -197,7 +197,7 @@ const initializeAdmin = async () => {
 // ========== FILE ROUTES (MongoDB Version) ==========
 
 // Upload files
-app.post('/api/employees/:employeeId/files', requireAuth, upload.array('files', 20), async (req, res) => {
+app.post('/api/employees/:employeeId/files', requireAuth, upload.array('files', 100), async (req, res) => {
   const employeeId = req.params.employeeId;
   const { folderId } = req.query;
 
